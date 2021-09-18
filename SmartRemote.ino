@@ -1,26 +1,60 @@
-#define USE_DISPLAY
+#define USE_OTA
+#define USE_WEB_SERVER
+//#define USE_DISPLAY
+//#define USE_MQTT
 
-#include <WiFiManager.h>
+#ifndef USE_MQTT
+#define USE_SINRIC_PRO
+#endif
+
 #include <WiFi.h>
+#include <IRremote.h>
+
+#ifdef USE_OTA
+#include <ArduinoOTA.h>
+#endif
+
+#ifdef USE_WEB_SERVER
 #include <WebServer.h>
+#endif
+
 #ifdef USE_DISPLAY
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #endif
-#include <IRremote.h>
+
+#ifdef USE_MQTT
 #include <Adafruit_MQTT.h>
 #include <Adafruit_MQTT_Client.h>
+#else
+#ifdef USE_SINRIC_PRO
+#include "SinricPro.h"
+#include "SinricProWindowAC.h"
+#endif
+#endif
 
+#define WIFI_HOST       "SmartRemote"
+#define WIFI_SSID       "<YOUR_WIFI_SSID>"
+#define WIFI_PASS       "<YOUR_WIFI_PASSWORD>"
+
+#ifdef USE_MQTT
 #define IO_SERVER       "io.adafruit.com"
 #define IO_SERVERPORT   1883                  
-#define IO_USERNAME     "<YOUR_USER_NAME>"
-#define IO_KEY          "<YOUR_IO_ADAFRUIT_KEY>"
+#define IO_USERNAME     "<YOUR_IO_USERNAME>"
+#define IO_KEY          "<YOUR_IO_KEY>"
 WiFiClient client;
 Adafruit_MQTT_Client mqtt(&client, IO_SERVER, IO_SERVERPORT, IO_USERNAME, IO_KEY);       
 Adafruit_MQTT_Subscribe AC_Control = Adafruit_MQTT_Subscribe(&mqtt, IO_USERNAME"/feeds/bedroom-ac");
 Adafruit_MQTT_Subscribe *subscription;
+#else
+#ifdef USE_SINRIC_PRO
+#define APP_KEY         "<YOUR_SINRIC_KEY>"                                       
+#define APP_SECRET      "<YOUR_SINRIC_SECRET>"
+#define ACUNIT_ID       "<YOUR_SINRIC_DEVICE_ID>"
+#endif
+#endif
 
 #define IR_SEND_PIN 4
 
@@ -45,9 +79,7 @@ const uint8_t timer_cmd[] PROGMEM = {181,89, 12,11, 12,10, 12,10, 12,33, 12,11, 
 #define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
 #define rawSize ARRAY_SIZE(power_cmd)
 
-WiFiManager wifiManager;
-const char* wifiDeviceName = "SmartRemote";
-
+#ifdef USE_WEB_SERVER
 WebServer server(80);
 #define GO_BACK server.sendHeader("Location", "/",true); server.send(302, "text/plane","");
 
@@ -55,6 +87,7 @@ WebServer server(80);
 const char index_html[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <head>
   <title>Smart AC remote control</title>
+  <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -93,7 +126,6 @@ const char index_html[] PROGMEM = R"rawliteral(<!DOCTYPE html>
 <body style="touch-action: pan-x pan-y;">
     <div style="zoom:.6;-o-transform: scale(.6);-moz-transform: scale(.6)">
         <img class="map" src="http://senssoft.com/img/ac_remote.png" usemap="#image-map">
-        <button onclick="if (confirm('Do you really want to reset WiFi settings?')) window.location.href='/resetWiFi';">Reset WiFi settings</button>
     </div>
     <map name="image-map">
         <area onclick="window.location.replace('/command?cmd=power');" coords="108,38,198,128" shape="rect">
@@ -111,6 +143,7 @@ const char index_html[] PROGMEM = R"rawliteral(<!DOCTYPE html>
     </map>
 </body>
 </html>)rawliteral";
+#endif
 
 int wifiStatus = WL_IDLE_STATUS;
 unsigned long prevMillis = 0;
@@ -121,56 +154,11 @@ void clearDisplay()
     display.clearDisplay();
     display.display();
     display.setCursor(0,0);
-}
-
-void showConnectionStatus()
-{
-    clearDisplay();
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        prevMillis = millis();
-        display.println("WiFi connected to");
-        display.setCursor(0,12);
-        display.println(wifiManager.getWiFiSSID());
-        display.setCursor(0,24);
-        display.print("IP: "); display.print(WiFi.localIP());
-    }
-    else
-    {
-        display.setCursor(0,12);
-        display.println("WiFi disconnected");
-        wifiManager.autoConnect(wifiDeviceName);
-    }
     display.display();
-}
-
-void showHotSpotInfo()
-{
-    clearDisplay();
-    display.println("- connect to WiFi");
-    display.println("hotspot 'SmartRemote'");
-    display.println("- open in browser");
-    display.println("http://192.168.4.1");
-    display.display();
+    delay(250);
 }
 #else
 void clearDisplay(){}
-void showConnectionStatus()
-{
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        prevMillis = millis();
-        Serial.println("WiFi connected to");
-        Serial.println(wifiManager.getWiFiSSID());
-        Serial.print("IP: "); display.print(WiFi.localIP());
-    }
-    else 
-    {
-        Serial.println("WiFi disconnected");
-        wifiManager.autoConnect(wifiDeviceName);
-    }
-}
-void showHotSpotInfo(){}
 #endif
 
 void executeCommand(String cmd)
@@ -188,6 +176,7 @@ void executeCommand(String cmd)
     else if (cmd=="timer") IrSender.sendRaw_P(timer_cmd, rawSize, 38);
 }
 
+#ifdef USE_WEB_SERVER
 void handleHTTPCommand()
 {
     if (server.args() == 1)
@@ -210,7 +199,9 @@ void handleHTTPCommand()
     }
     GO_BACK
 }
+#endif
 
+#ifdef USE_MQTT
 void handleGoogleCommand(String cmd)
 {
     cmd.toLowerCase();
@@ -238,6 +229,51 @@ void handleGoogleCommand(String cmd)
 #endif        
     executeCommand(cmd);
 }
+#endif
+
+void waitForWiFiConnectOrReboot()
+{
+  uint32_t notConnectedCounter = 0;
+  while (WiFi.status() != WL_CONNECTED) 
+  {
+      delay(200);
+      notConnectedCounter++;
+      if (notConnectedCounter > 30) ESP.restart();
+  }
+  // Print wifi IP addess
+  Serial.println("IP address: ");
+  Serial.println(WiFi.localIP());
+}
+
+#ifdef USE_SINRIC_PRO
+float globalTemperature = 18;
+
+bool onPowerState(const String &deviceId, bool &state) 
+{
+    executeCommand("power");
+    return true;
+}
+
+bool onTargetTemperature(const String &deviceId, float &temperature) 
+{
+    executeCommand(temperature < globalTemperature ? "temp_down" : "temp_up");
+    globalTemperature = temperature;
+    return true;
+}
+
+bool onAdjustTargetTemperature(const String & deviceId, float &temperatureDelta) 
+{
+    return true;
+}
+
+bool onThermostatMode(const String &deviceId, String &mode) 
+{
+    if (mode.indexOf("cool") >=0) executeCommand("cool");
+    else if (mode.indexOf("auto") >=0) executeCommand("auto");
+    else if (mode.indexOf("saver") >=0) executeCommand("energy");
+    return true;
+}
+#endif
 
 void setup() 
 {
@@ -249,62 +285,113 @@ void setup()
     display.begin(SSD1306_SWITCHCAPVCC);
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
+    clearDisplay();
+    display.println("- connect to WiFi");
+    display.println("hotspot 'SmartRemote'");
+    display.println("- open in browser");
+    display.println("http://192.168.4.1");
+    display.display();
+    delay(250);
 #endif    
 
     IrSender.begin(IR_SEND_PIN, true); 
 
     // Connect to WiFi
-    wifiManager.setConfigPortalBlocking(false);    
-    wifiManager.setSaveConfigCallback( []() { wifiManager.reboot(); });
-    wifiManager.setHostname(wifiDeviceName);
-    if (wifiManager.autoConnect(wifiDeviceName)) showConnectionStatus(); else showHotSpotInfo();
-    wifiStatus = WiFi.status();
+    WiFi.setHostname(WIFI_HOST);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    waitForWiFiConnectOrReboot();
 
+    if (WiFi.status() == WL_CONNECTED) 
+    {
+        Serial.print("IP address: "); Serial.println(WiFi.localIP());
+#ifdef USE_OTA
+        ArduinoOTA
+            .onStart([]() {
+                String type;
+                if (ArduinoOTA.getCommand() == U_FLASH) type = "sketch"; else type = "filesystem";
+                Serial.println("Start updating " + type);
+            })
+            .onEnd([]() { Serial.println("\nEnd"); })
+            .onProgress([](unsigned int progress, unsigned int total) { Serial.printf("Progress: %u%%\r", (progress / (total / 100))); })
+            .onError([](ota_error_t error) { Serial.printf("Error[%u]: ", error); });
+    
+        ArduinoOTA.setHostname(WIFI_HOST);
+        ArduinoOTA.begin();
+    }
+#endif    
+
+#ifdef USE_WEB_SERVER
     // Setup web server
     server.on("/", []() { server.send(200, "text/html", index_html); } );
     server.on("/command", handleHTTPCommand);
-    server.on("/resetWiFi", []() { wifiManager.resetSettings(); wifiManager.reboot(); });
     server.on("/favicon.ico", []() { server.sendHeader("Location", "http://senssoft.com/ac.ico",true); server.send(302, "text/plane",""); });
     server.onNotFound( [](){ GO_BACK });
     server.begin();
+#endif    
 
+#ifdef USE_MQTT
     // Subscribe for Adafruit IO feed
     mqtt.subscribe(&AC_Control);
 #ifndef USE_DISPLAY
     Serial.println("Connecting to MQTT server...");
 #endif
     mqtt.connect();
+#else
+#ifdef USE_SINRIC_PRO
+    // get a new AC unit device from SinricPro
+    SinricProWindowAC &myAcUnit = SinricPro[ACUNIT_ID];
+    myAcUnit.onPowerState(onPowerState);
+    myAcUnit.onTargetTemperature(onTargetTemperature);
+    myAcUnit.onAdjustTargetTemperature(onAdjustTargetTemperature);
+    myAcUnit.onThermostatMode(onThermostatMode); 
+
+    // setup SinricPro
+    SinricPro.onConnected([](){ Serial.printf("Connected to SinricPro\r\n"); }); 
+    SinricPro.onDisconnected([](){ Serial.printf("Disconnected from SinricPro\r\n"); });
+    SinricPro.begin(APP_KEY, APP_SECRET);
+#endif
+#endif
 }
 
 void loop() 
 {
-    // Check WiFi status every 5 seconds
-    if(millis()-prevMillis > 5*1000)
+    // Check WiFi status every minute
+    if(millis()-prevMillis > 5*60*1000)
     {
-        prevMillis = millis();        
-        if (WiFi.status() != wifiStatus)
-        {
-            wifiStatus = WiFi.status();
-            showConnectionStatus();            
-        }
+        if (WiFi.status() != WL_CONNECTED) ESP.restart();
+        else prevMillis = millis();
     }
-    
-    wifiManager.process();    
-    server.handleClient();
 
-    if (mqtt.connected())
+#ifdef USE_OTA    
+    ArduinoOTA.handle();
+#endif    
+
+    if (WiFi.status() == WL_CONNECTED)
     {
-        while ((subscription = mqtt.readSubscription(500))) 
+#ifdef USE_WEB_SERVER        
+        server.handleClient();
+#endif        
+    
+#ifdef USE_MQTT        
+        if (mqtt.connected())
         {
-            if (subscription == &AC_Control) 
-                handleGoogleCommand(String ((char*)AC_Control.lastread));
+            while ((subscription = mqtt.readSubscription(500))) 
+            {
+                if (subscription == &AC_Control) 
+                    handleGoogleCommand(String ((char*)AC_Control.lastread));
+            }
         }
-    }
-    else
-    {
+        else
+        {
 #ifndef USE_DISPLAY
-        Serial.println("Connecting to MQTT server...");
+            Serial.println("Connecting to MQTT server...");
 #endif
-        mqtt.connect();
+            mqtt.connect();
+        }
+#else
+#ifdef USE_SINRIC_PRO
+        SinricPro.handle();
+#endif
+#endif
     }
 }
