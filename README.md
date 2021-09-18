@@ -52,7 +52,9 @@ void loop()
 
 5) Open [that site](https://www.image-map.net/), upload your image and create image map for all remote buttons.
 6) Copy HTML source code of generated image map, and adjuust Arduino sketch HTML  and Javascrip code
-7) To integrate with Google Home (or Alexa, or Siri), follow [this guide](https://iotdesignpro.com/projects/google-assistant-controlled-led-using-ESP32-and-adafruit-io) (all information is up to date, at least on June, 15, 2021)
+7) For Google Home (or Alexa, or Siri) integration, you have couple of options:
+- you may use [Sinric Pro](https://sinric.pro/) service (it has a detailet how-to guide)
+- of Adafruit IO and IFTTT, using [this guide](https://iotdesignpro.com/projects/google-assistant-controlled-led-using-ESP32-and-adafruit-io), but personally I can't recommend this way 'cause of integration instability of IFTTT and Google Assistant, one day your applets may stopped working (as it happened to me) and there is **no way** to resolve the issue, even with IFTTT's paid "Pro" plan, actual support arn't exist.
 8) Assemble your smart remote, flash sketch, attach to AC/TV/gadget by mounting scotch tape and you should be allset. By the way, don't forget to configure WiFi connection finally. You should get something like this (it's my smart remote attached to my old Frigidaire air conditioner
 
 <img width="300px" src="http://senssoft.com/img/remote_pic.jpg">
